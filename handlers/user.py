@@ -4,48 +4,88 @@ from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from create_bot import dp, bot
 
-from keyboards.choose_mode_kb import kb_choose_mode
-from keyboards.choose_search_mode_team_kb import kb_choose_search_mode_team
-from keyboards.search_res_kb import kb_res
-from keyboards.show_button_kb import kb_show
+from keyboards.start_kb import create_start_kb
+from keyboards.YesNo_kb import kb_YesNo
+from keyboards.button_continue import kb_continue
 
-class FSMUser(StatesGroup):
+class FSMUserSearching(StatesGroup):
     input_skills = State()
     viewing = State()
 
+class FSMUserRegis(StatesGroup):
+    create_acc = State()
+    name = State()
+    has_team = State()
+    skills = State()
+    telegram = State()
+    description = State()
+    correct = State()
+
 
 async def command_start(message: types.Message):
-    await bot.send_message(message.from_user.id, 'okey', reply_markup=kb_choose_mode) #, reply_markup = ReplyKeyboardRemove())
+    #запрос в бд
+    reg = False
+    kb = await create_start_kb(reg)
+    mes = "Привет! A я тебя помню :)" if reg else "Я тебя впервые вижу..."
+    await bot.send_message(message.from_user.id, mes, reply_markup=kb) #, reply_markup = ReplyKeyboardRemove())
 
-async def command_begin_search(message: types.Message):
-    await bot.send_message(message.from_user.id, 'okey', reply_markup=kb_choose_search_mode_team)
+async def command_create_acc(message: types.Message,state: FSMContext):
+    async with state.proxy() as data:
+        data['id'] = message.from_user.id
+    await FSMUserRegis.name.set()
+    await bot.send_message(message.from_user.id, "Как мне тебя называть?", reply_markup=ReplyKeyboardRemove())
 
-async def input_skills(message: types.Message):
-    await FSMUser.input_skills.set()
-    await bot.send_message(message.from_user.id, 'напиши необходимые умения', reply_markup=ReplyKeyboardRemove())
+async def input_name_acc(message: types.Message,state: FSMContext):
+    async with state.proxy() as data:
+        data['name'] = message.text
+    await FSMUserRegis.has_team.set()
+    await bot.send_message(message.from_user.id, "У тебя ужe есть команда?", reply_markup=kb_YesNo)
 
-async def parse_skills(message: types.Message, state: FSMContext):
+async def input_has_team(message: types.Message,state: FSMContext):
+    async with state.proxy() as data:
+        if message.text == 'да':
+            data['has_team'] = True
+        elif message.text == 'нет':
+            data['has_team'] = False
+
+    await FSMUserRegis.skills.set()
+    await bot.send_message(message.from_user.id, "Отправь все свои умения", reply_markup=ReplyKeyboardRemove())
+
+async def input_skills(message: types.Message,state: FSMContext):
     async with state.proxy() as data:
         data['skills'] = message.text
-    await FSMUser.viewing.set()
-    await bot.send_message(message.from_user.id, 'найдено x команд', reply_markup=kb_show)
+    await FSMUserRegis.description.set()
+    await bot.send_message(message.from_user.id, "Опиши себя")
 
-async def show_res(message: types.Message, state: FSMContext):
-    if(message.text == 'Next' or message.text == 'Показать'):
-        await FSMUser.viewing.set()
-        await bot.send_message(message.from_user.id, 'типо анкета', reply_markup=kb_res)
-    if(message.text == 'Отмена'):
-        current_state = await state.get_state()
-        if current_state is None:
-            return
-        await state.finish()
-        await bot.send_message(message.from_user.id, 'я вернул вас на главную', reply_markup=kb_choose_mode)
+async def input_description(message: types.Message,state: FSMContext):
+    async with state.proxy() as data:
+        data['description'] = message.text
+    await FSMUserRegis.telegram.set()
+    await bot.send_message(message.from_user.id, "Отлично! Отправь мне свой телеграмм, чтобы с тобой могли связаться другие участники")
 
+async def input_tg(message: types.Message,state: FSMContext):
+    async with state.proxy() as data:
+        data['telegram'] = message.text
+    await FSMUserRegis.correct.set()
+    #kb = await create_start_kb(False)
+    await bot.send_message(message.from_user.id, "Я всё записал", reply_markup=kb_continue)
+
+async def correct_acc(message: types.Message,state: FSMContext):
+    async with state.proxy() as data:
+        s = ''
+        for i in data:
+            s += (str(i) + ':' + str(data[i]) + '\n')
+
+    await state.finish()
+    await bot.send_message(message.from_user.id, s, reply_markup=ReplyKeyboardRemove())
 
 def register_handlers_client(dp: Dispatcher):
     dp.register_message_handler(command_start, commands=['start'], state=None)
-    dp.register_message_handler(command_begin_search, commands=['Искать_команду'], state=None)
-    dp.register_message_handler(input_skills, commands=['Искать_по_умениям'], state=None)
-    dp.register_message_handler(parse_skills, state=FSMUser.input_skills)
-    dp.register_message_handler(show_res, state=FSMUser.viewing)
+    dp.register_message_handler(command_create_acc, commands=['Создать_аккаунт'], state=None)
+    dp.register_message_handler(input_name_acc, state=FSMUserRegis.name)
+    dp.register_message_handler(input_has_team, state=FSMUserRegis.has_team)
+    dp.register_message_handler(input_skills, state=FSMUserRegis.skills)
+    dp.register_message_handler(input_description, state=FSMUserRegis.description)
+    dp.register_message_handler(input_tg, state=FSMUserRegis.telegram)
+    dp.register_message_handler(correct_acc, state=FSMUserRegis.correct)
 
